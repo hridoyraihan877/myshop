@@ -376,15 +376,42 @@ async function addProduct(){
  e.preventDefault();
  if(!(await isAdmin()))return;
  const fd=new FormData(e.target);
- const file=fd.get("image");
- let url="";
- if(file.size){
- if(file.size>3*1024*1024)return notice("Image max 3MB");
- const path=crypto.randomUUID()+"-"+file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
- const {error}=await db.storage.from("products").upload(path,file);
- if(error)return notice(error.message);
- url=db.storage.from("products").getPublicUrl(path).data.publicUrl;
- }
+ 
+const file = fd.get("image");
+let url = "";
+
+if (file && file.size > 0) {
+  if (file.size > 3 * 1024 * 1024) {
+    return notice("Image max 3MB");
+  }
+
+  if (!file.type.startsWith("image/")) {
+    return notice("Please select a valid image");
+  }
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  const path = crypto.randomUUID() + "." + ext;
+
+  const { data, error } = await db.storage
+    .from("products")
+    .upload(path, file, {
+      contentType: file.type,
+      cacheControl: "3600",
+      upsert: false
+    });
+
+  if (error) {
+    console.error("STORAGE UPLOAD ERROR:", error);
+    return notice(
+      "Image upload failed: " + error.message
+    );
+  }
+
+  url = db.storage
+    .from("products")
+    .getPublicUrl(data.path).data.publicUrl;
+}
+
  const {error}=await db.from("products").insert({
  name:fd.get("name"),description:fd.get("description"),
  price:Number(fd.get("price")),category_id:Number(fd.get("category")),
