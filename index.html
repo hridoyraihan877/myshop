@@ -125,7 +125,11 @@ function renderProducts(){
 
  $("products").innerHTML=list.length?list.map(p=>`
  <div class="product">
- <img src="${safe(p.image_url||'https://placehold.co/300x200?text=MyShop')}">
+ <img
+  src="${safe(p.image_url || 'https://placehold.co/300x200?text=MyShop')}"
+  onerror="this.onerror=null;this.src='https://placehold.co/300x200?text=Image+Not+Found';"
+  style="width:100%;height:140px;object-fit:contain;"
+>
  <h3>${safe(p.name)}</h3>
  <p>${safe(p.description)}</p>
  <div class="price">৳${p.price}</div>
@@ -407,9 +411,13 @@ if (file && file.size > 0) {
     );
   }
 
-  url = db.storage
-    .from("products")
-    .getPublicUrl(data.path).data.publicUrl;
+ const result = db.storage
+  .from("products")
+  .getPublicUrl(data.path);
+
+url = result.data.publicUrl;
+
+console.log("Uploaded Image URL:", url);
 }
 
  const {error}=await db.from("products").insert({
