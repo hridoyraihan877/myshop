@@ -1,0 +1,482 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyShop Online Shopping</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
+header{background:#f85606;color:white;padding:16px;position:sticky;top:0}
+.logo{font-size:28px;font-weight:bold}
+input,textarea,select{width:100%;padding:12px;margin:7px 0;border:1px solid #ddd;border-radius:7px}
+button{padding:11px 15px;background:#f85606;color:white;border:0;border-radius:6px;margin:4px;cursor:pointer}
+main{max-width:1000px;margin:auto;padding:15px}
+.hero{background:#ffe6d9;padding:25px;border-radius:12px;margin:15px 0}
+.products{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.product,.card{background:white;padding:12px;border-radius:9px;margin-bottom:12px}
+.product img{width:100%;height:140px;object-fit:contain}
+.price{color:#f85606;font-size:20px;font-weight:bold}
+nav{display:flex;overflow:auto;background:white}
+nav button{white-space:nowrap}
+#panel{position:fixed;inset:0;background:#f5f5f5;z-index:10;overflow:auto}
+.hidden{display:none!important}
+footer{background:#222;color:white;text-align:center;padding:20px}
+@media(min-width:650px){.products{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+
+<header>
+ <div class="logo">🛍️ MyShop</div>
+ <button onclick="showCart()">🛒 Cart (<span id="count">0</span>)</button>
+ <button onclick="adminLogin()">Admin Login</button>
+ <input id="search" placeholder="Search products...">
+</header>
+
+<nav id="categories"></nav>
+
+<main>
+ <section class="hero">
+  <h1>Welcome to MyShop!</h1>
+  <p>আপনার পছন্দের পণ্য কিনুন সহজেই।</p>
+  <button onclick="document.getElementById('products').scrollIntoView()">Shop Now</button>
+ </section>
+
+ <h2>Our Products</h2>
+ <section id="products" class="products">Loading...</section>
+
+ <div class="card">
+  <h3>Track Your Order</h3>
+  <button onclick="trackForm()">Track Order</button>
+ </div>
+</main>
+
+<footer>
+ <h2>MyShop</h2>
+ <p>Your trusted online shopping store.</p>
+ <p>© 2026 MyShop</p>
+</footer>
+
+<div id="panel" class="hidden">
+ <header>
+  <b id="panelTitle">MyShop</b>
+  <button onclick="closePanel()">Close ✕</button>
+ </header>
+ <main id="panelContent"></main>
+</div>
+
+<script>
+// SUPABASE CONFIGURATION
+const SUPABASE_URL="YOUR_SUPABASE_PROJECT_URL";
+const SUPABASE_KEY="YOUR_SUPABASE_PUBLISHABLE_KEY";
+
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+let products=[];
+let categories=[];
+let cart=JSON.parse(localStorage.getItem("myshop_cart")||"[]");
+let selected="All";
+
+const $=id=>document.getElementById(id);
+
+function safe(v){
+ return String(v??"").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ })[c]);
+}
+
+function panel(title,html){
+ $("panelTitle").textContent=title;
+ $("panelContent").innerHTML=html;
+ $("panel").classList.remove("hidden");
+}
+function closePanel(){$("panel").classList.add("hidden")}
+function notice(t){alert(t)}
+
+async function load(){
+ const r=await db.from("products").select("*")
+ .eq("is_active",true).order("created_at",{ascending:false});
+ if(r.error){$("products").textContent=r.error.message;return}
+ products=r.data||[];
+
+ const c=await db.from("categories").select("*");
+ categories=c.data||[];
+ renderCategories();
+ renderProducts();
+}
+
+function renderCategories(){
+ $("categories").innerHTML=
+ `<button onclick="filter('All')">All</button>`+
+ categories.map(c=>`<button onclick="filter('${c.id}')">${safe(c.name)}</button>`).join("");
+}
+
+function filter(id){selected=id;renderProducts()}
+
+function renderProducts(){
+ const term=$("search").value.toLowerCase();
+ const list=products.filter(p=>
+ (selected==="All"||String(p.category_id)===String(selected))&&
+ p.name.toLowerCase().includes(term)
+ );
+
+ $("products").innerHTML=list.length?list.map(p=>`
+ <div class="product">
+ <img src="${safe(p.image_url||'https://placehold.co/300x200?text=MyShop')}">
+ <h3>${safe(p.name)}</h3>
+ <p>${safe(p.description)}</p>
+ <div class="price">৳${p.price}</div>
+ <p>Stock: ${p.stock}</p>
+ <button onclick="add(${p.id})" ${p.stock<=0?"disabled":""}>Add to Cart</button>
+ <button onclick="buy(${p.id})">Buy Now</button>
+ </div>`).join(""):"No products found";
+}
+$("search").oninput=renderProducts;
+
+function save(){
+ localStorage.setItem("myshop_cart",JSON.stringify(cart));
+ $("count").textContent=cart.reduce((s,i)=>s+i.quantity,0);
+}
+
+function add(id){
+ const p=products.find(x=>x.id===id);
+ if(!p||p.stock<1)return;
+ const i=cart.find(x=>x.id===id);
+ if(i){
+ if(i.quantity>=p.stock)return notice("Stock limit reached");
+ i.quantity++;
+ }else cart.push({id,quantity:1});
+ save();notice("Added to cart");
+}
+
+function buy(id){
+ cart=[];
+ const p=products.find(x=>x.id===id);
+ if(!p||p.stock<1)return;
+ cart.push({id,quantity:1});save();showCart();
+}
+
+function showCart(){
+ let total=cart.reduce((s,i)=>{
+ const p=products.find(x=>x.id===i.id);
+ return s+(p?p.price*i.quantity:0);
+ },0);
+
+ panel("Shopping Cart",`
+ ${cart.map(i=>{
+ const p=products.find(x=>x.id===i.id);
+ if(!p)return "";
+ return `<div class="card">
+ <b>${safe(p.name)}</b><p>৳${p.price} × ${i.quantity}</p>
+ <button onclick="change(${p.id},-1)">-</button>
+ <button onclick="change(${p.id},1)">+</button>
+ <button onclick="remove(${p.id})">Remove</button>
+ </div>`;
+ }).join("")}
+ <h2>Total: ৳${total}</h2>
+ ${cart.length?'<button onclick="checkout()">Checkout</button>':"Cart is empty"}
+ `);
+}
+
+function change(id,n){
+ const i=cart.find(x=>x.id===id);
+ const p=products.find(x=>x.id===id);
+ if(!i||!p)return;
+ i.quantity+=n;
+ if(i.quantity>p.stock)i.quantity=p.stock;
+ if(i.quantity<=0)remove(id);
+ else{save();showCart()}
+}
+function remove(id){
+ cart=cart.filter(x=>x.id!==id);save();showCart();
+}
+
+function checkout(){
+ const total=cart.reduce((s,i)=>{
+ const p=products.find(x=>x.id===i.id);
+ return s+(p?p.price*i.quantity:0);
+ },0);
+
+ panel("Checkout",`
+ <div class="card">
+ <form id="checkout">
+ <input name="name" placeholder="Your Name" required>
+ <input name="phone" placeholder="Phone Number" required>
+ <textarea name="address" placeholder="Delivery Address" required></textarea>
+ <h3>Cash on Delivery</h3>
+ <h2>Total: ৳${total}</h2>
+ <button>Confirm Order</button>
+ </form></div>`);
+
+ $("checkout").onsubmit=async e=>{
+ e.preventDefault();
+ const fd=new FormData(e.target);
+ const items=cart.map(i=>({id:i.id,quantity:i.quantity}));
+ const {data,error}=await db.rpc("place_myshop_order",{
+ p_name:fd.get("name"),p_phone:fd.get("phone"),
+ p_address:fd.get("address"),p_items:items
+ });
+ if(error)return notice(error.message);
+ cart=[];save();
+ localStorage.setItem("myshop_order_"+data.order_id,data.tracking_token);
+ panel("Order Successful",`
+ <div class="card">
+ <h2>🎉 Order placed!</h2>
+ <h3>Order ID: ${data.order_id}</h3>
+ <p>Total: ৳${data.total}</p>
+ <p>Save your tracking token:</p>
+ <textarea readonly>${safe(data.tracking_token)}</textarea>
+ <button onclick="trackForm(${data.order_id})">Track Order</button>
+ </div>`);
+ await load();
+ };
+}
+
+function trackForm(id=""){
+ panel("Track Order",`
+ <div class="card">
+ <form id="tracking">
+ <input name="id" type="number" value="${id}" placeholder="Order ID" required>
+ <input name="token" placeholder="Tracking Token" required>
+ <button>Track</button></form>
+ <div id="trackResult"></div>
+ </div>`);
+ $("tracking").onsubmit=async e=>{
+ e.preventDefault();
+ const fd=new FormData(e.target);
+ await track(Number(fd.get("id")),fd.get("token"));
+ };
+ if(id){
+ const token=localStorage.getItem("myshop_order_"+id);
+ if(token){
+ $("tracking").elements.token.value=token;
+ track(id,token);
+ }}
+}
+
+async function track(id,token){
+ const box=$("trackResult");
+ box.textContent="Loading...";
+ const {data,error}=await db.rpc("track_myshop_order",{
+ p_order_id:id,p_token:token
+ });
+ if(error||!data){box.textContent="Order not found";return}
+ box.innerHTML=`
+ <h3>Order #${data.id}</h3>
+ <p>Status: ${safe(data.status)}</p>
+ <p>Total: ৳${data.total}</p>
+ <h4>Products</h4>
+ ${data.items.map(i=>`<p>${safe(i.product_name)} × ${i.quantity}</p>`).join("")}
+ <h4>Messages</h4>
+ ${data.messages.map(m=>`<p><b>${safe(m.sender)}:</b> ${safe(m.body)}</p>`).join("")}
+ <form id="sendMessage">
+ <textarea name="body" placeholder="Message to shop" required></textarea>
+ <button>Send Message</button></form>`;
+ $("sendMessage").onsubmit=async e=>{
+ e.preventDefault();
+ const body=new FormData(e.target).get("body");
+ const {error}=await db.rpc("send_myshop_message",{
+ p_order_id:id,p_token:token,p_body:body
+ });
+ if(error)return notice(error.message);
+ await track(id,token);
+ };
+}
+
+// ADMIN LOGIN
+async function isAdmin(){
+ const {data:{user}}=await db.auth.getUser();
+ if(!user)return false;
+ const {data}=await db.from("admin_users")
+ .select("user_id").eq("user_id",user.id).maybeSingle();
+ return !!data;
+}
+
+function adminLogin(){
+ panel("Admin Login",`
+ <div class="card"><form id="login">
+ <input name="email" type="email" placeholder="Admin Email" required>
+ <input name="password" type="password" placeholder="Password" required>
+ <button>Login</button></form></div>`);
+ $("login").onsubmit=async e=>{
+ e.preventDefault();
+ const fd=new FormData(e.target);
+ const {error}=await db.auth.signInWithPassword({
+ email:fd.get("email"),password:fd.get("password")
+ });
+ if(error)return notice(error.message);
+ await dashboard();
+ };
+}
+
+async function dashboard(){
+ if(!(await isAdmin())){
+ await db.auth.signOut();return notice("Admin access denied");
+ }
+ panel("MyShop Admin",`
+ <div class="card">
+ <button onclick="manageProducts()">Products</button>
+ <button onclick="addProduct()">Add Product</button>
+ <button onclick="manageOrders()">Orders</button>
+ <button onclick="manageMessages()">Messages</button>
+ <button onclick="logout()">Logout</button>
+ </div><div id="adminContent"></div>`);
+}
+
+async function logout(){await db.auth.signOut();closePanel()}
+
+// ADMIN PRODUCT MANAGEMENT
+async function addProduct(){
+ if(!(await isAdmin()))return;
+ const {data:cats}=await db.from("categories").select("*");
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Add Product</h3>
+ <form id="addForm">
+ <input name="name" placeholder="Product Name" required>
+ <textarea name="description" placeholder="Description"></textarea>
+ <input name="price" type="number" min="0" step=".01" placeholder="Price" required>
+ <select name="category" required>
+ <option value="">Category</option>
+ ${(cats||[]).map(c=>`<option value="${c.id}">${safe(c.name)}</option>`).join("")}
+ </select>
+ <input name="stock" type="number" min="0" placeholder="Stock" required>
+ <input name="image" type="file" accept="image/*">
+ <button>Upload Product</button></form></div>`;
+
+ $("addForm").onsubmit=async e=>{
+ e.preventDefault();
+ if(!(await isAdmin()))return;
+ const fd=new FormData(e.target);
+ const file=fd.get("image");
+ let url="";
+ if(file.size){
+ if(file.size>3*1024*1024)return notice("Image max 3MB");
+ const path=crypto.randomUUID()+"-"+file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+ const {error}=await db.storage.from("products").upload(path,file);
+ if(error)return notice(error.message);
+ url=db.storage.from("products").getPublicUrl(path).data.publicUrl;
+ }
+ const {error}=await db.from("products").insert({
+ name:fd.get("name"),description:fd.get("description"),
+ price:Number(fd.get("price")),category_id:Number(fd.get("category")),
+ stock:Number(fd.get("stock")),image_url:url,is_active:true
+ });
+ if(error)return notice(error.message);
+ notice("Product uploaded!");
+ await load();await manageProducts();
+ };
+}
+
+async function manageProducts(){
+ if(!(await isAdmin()))return;
+ const {data,error}=await db.from("products").select("*").order("id",{ascending:false});
+ if(error)return notice(error.message);
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Manage Products</h3>
+ ${data.map(p=>`<div class="card">
+ <b>${safe(p.name)}</b><p>৳${p.price} | Stock ${p.stock}</p>
+ <button onclick="editProduct(${p.id})">Edit</button>
+ <button onclick="deleteProduct(${p.id})">Delete</button>
+ </div>`).join("")}</div>`;
+}
+
+async function editProduct(id){
+ if(!(await isAdmin()))return;
+ const {data:p}=await db.from("products").select("*").eq("id",id).single();
+ if(!p)return;
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Edit Product</h3>
+ <form id="editForm">
+ <input name="name" value="${safe(p.name)}" required>
+ <textarea name="description">${safe(p.description)}</textarea>
+ <input name="price" type="number" min="0" step=".01" value="${p.price}" required>
+ <input name="stock" type="number" min="0" value="${p.stock}" required>
+ <button>Save</button></form></div>`;
+ $("editForm").onsubmit=async e=>{
+ e.preventDefault();
+ if(!(await isAdmin()))return;
+ const fd=new FormData(e.target);
+ const {error}=await db.from("products").update({
+ name:fd.get("name"),description:fd.get("description"),
+ price:Number(fd.get("price")),stock:Number(fd.get("stock"))
+ }).eq("id",id);
+ if(error)return notice(error.message);
+ await load();await manageProducts();
+ };
+}
+
+async function deleteProduct(id){
+ if(!(await isAdmin())||!confirm("Delete product?"))return;
+ const {error}=await db.from("products").delete().eq("id",id);
+ if(error)return notice(error.message);
+ await load();await manageProducts();
+}
+
+// ADMIN ORDERS
+async function manageOrders(){
+ if(!(await isAdmin()))return;
+ const {data,error}=await db.from("orders")
+ .select("*,customers(name,phone)").order("created_at",{ascending:false});
+ if(error)return notice(error.message);
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Customer Orders</h3>
+ ${data.map(o=>`<div class="card">
+ <h3>Order #${o.id}</h3>
+ <p>${safe(o.customers?.name)} - ${safe(o.customers?.phone)}</p>
+ <p>${safe(o.address)}</p><p>৳${o.total}</p>
+ <select id="s${o.id}">
+ ${["Pending","Accepted","Processing","Shipped","Delivered","Cancelled"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}
+ </select>
+ <button onclick="updateOrder(${o.id})">Update Status</button>
+ </div>`).join("")}</div>`;
+}
+
+async function updateOrder(id){
+ if(!(await isAdmin()))return;
+ const {error}=await db.from("orders").update({
+ status:$("s"+id).value
+ }).eq("id",id);
+ if(error)return notice(error.message);
+ notice("Order updated");await manageOrders();
+}
+
+// ADMIN CUSTOMER MESSAGES
+async function manageMessages(){
+ if(!(await isAdmin()))return;
+ const {data,error}=await db.from("messages").select("*").order("created_at",{ascending:false});
+ if(error)return notice(error.message);
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Messages</h3>
+ ${data.map(m=>`<div class="card">
+ <b>Order #${m.order_id}</b>
+ <p>${safe(m.sender)}: ${safe(m.body)}</p>
+ ${m.sender==="Customer"?`<button onclick="reply(${m.order_id})">Reply</button>`:""}
+ </div>`).join("")}</div>`;
+}
+
+async function reply(id){
+ if(!(await isAdmin()))return;
+ $("adminContent").innerHTML=`
+ <div class="card"><h3>Reply</h3>
+ <form id="replyForm">
+ <textarea name="body" required></textarea>
+ <button>Send Reply</button></form></div>`;
+ $("replyForm").onsubmit=async e=>{
+ e.preventDefault();
+ const body=new FormData(e.target).get("body");
+ const {error}=await db.from("messages").insert({
+ order_id:id,sender:"Admin",body
+ });
+ if(error)return notice(error.message);
+ await manageMessages();
+ };
+}
+
+save();
+load();
+</script>
+</body>
+</html>
