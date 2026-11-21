@@ -287,11 +287,22 @@ async function track(id,token){
 }
 
 // ADMIN LOGIN
+
 async function isAdmin() {
   const { data: { user }, error: authError } =
     await db.auth.getUser();
 
-  if (authError || !user) return false;
+  if (authError) {
+    console.error("AUTH ERROR:", authError);
+    return false;
+  }
+
+  if (!user) {
+    console.error("No logged-in user found");
+    return false;
+  }
+
+  console.log("Logged in User ID:", user.id);
 
   const { data, error } = await db
     .from("admin_users")
@@ -300,12 +311,15 @@ async function isAdmin() {
     .maybeSingle();
 
   if (error) {
-    console.error("Admin check error:", error);
+    console.error("ADMIN DATABASE ERROR:", error);
     return false;
   }
 
+  console.log("Admin Record:", data);
+
   return !!data;
 }
+
 
 function adminLogin(){
  panel("Admin Login",`
